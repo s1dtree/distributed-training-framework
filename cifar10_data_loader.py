@@ -4,18 +4,24 @@ import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import numpy as np
 
-def load_cifar10_data(batch_size=64, num_workers=2):
+def load_cifar10_data(batch_size=64, num_workers=2, return_datasets=False):
     """
     Load and preprocess CIFAR-10 dataset
 
     Args:
         batch_size (int): # of samples per batch
         num_workers (int): # of subprocesses for data loading
+        return_datasets (bool): If True, return datasets instead of data loaders
 
     Returns:
-        train_loader (DataLoader): DataLoader for the training set
-        test_loader (DataLoader): DataLoader for the test set
-        classes (tuple): Class names for CIFAR-10
+        If return_datasets is False:
+            train_loader (DataLoader): DataLoader for the training set
+            test_loader (DataLoader): DataLoader for the test set
+            classes (tuple): Class names for CIFAR-10
+        If return_datasets is True:
+            train_dataset (Dataset): Training dataset
+            test_dataset (Dataset): Test dataset
+            classes (tuple): Class names for CIFAR-10
     """
 
     train_transform = transforms.Compose([
@@ -39,19 +45,25 @@ def load_cifar10_data(batch_size=64, num_workers=2):
         transform=train_transform
     )
 
+    test_dataset = torchvision.datasets.CIFAR10(
+        root='./data',
+        train=False,
+        download=True,
+        transform=test_transform
+    )
+
+    classes = ('plane', 'car', 'bird', 'cat', 'deer',
+               'dog', 'frog', 'horse', 'ship', 'truck')
+
+    if return_datasets:
+        return train_dataset, test_dataset, classes
+
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         pin_memory=True
-    )
-
-    test_dataset = torchvision.datasets.CIFAR10(
-        root='./data',
-        train=False,
-        download=True,
-        transform=test_transform
     )
 
     test_loader = torch.utils.data.DataLoader(
@@ -61,9 +73,6 @@ def load_cifar10_data(batch_size=64, num_workers=2):
         num_workers=num_workers,
         pin_memory=True
     )
-
-    classes = ('plane', 'car', 'bird', 'cat', 'deer',
-               'dog', 'frog', 'horse', 'ship', 'truck')
     
     return train_loader, test_loader, classes
 
