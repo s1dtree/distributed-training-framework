@@ -32,14 +32,11 @@ def train_one_epoch(model, train_loader, criterion, optimizer, device):
     for inputs, targets in tqdm(train_loader, desc="Training"):
         inputs, targets = inputs.to(device), targets.to(device)
 
-        # Zero parameter gradients
         optimizer.zero_grad()
 
-        # Forward pass
         outputs = model(inputs)
         loss = criterion(outputs, targets)
 
-        # Backward pass & optimize
         loss.backward()
         optimizer.step()
 
