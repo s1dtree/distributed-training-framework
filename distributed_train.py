@@ -96,7 +96,7 @@ def validate(model, test_loader, criterion, device, rank):
 
     return average_loss, accuracy   
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description="Train a CNN on CIFAR-10")
     parser.add_argument('--batch_size', type=int, default=64, help='Input batch size (default: 64)')
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs to train (default: 10)')
@@ -108,37 +108,57 @@ def main():
     parser.add_argument('--local_rank', type=int, default=int(os.environ.get('LOCAL_RANK', -1)), 
                         help='Local rank for distributed training (-1 for non-distributed)')
     parser.add_argument('--backend', type=str, default='auto', 
+                        choices=['auto', 'nccl', 'gloo'],
                         help='Distributed backend: nccl, gloo, or auto (default: auto)')
     
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    if args.local_rank != -1:
-        if args.backend == 'auto':
-            backend = 'nccl' if torch.cuda.is_available() else 'gloo'
-        else:
-            backend = args.backend
-
-        dist.init_process_group(backend=backend)
-        rank = dist.get_rank()
-        world_size = dist.get_world_size()
-
-        if backend == 'nccl':
-            torch.cuda.set_device(args.local_rank)
-            device = torch.device(f"cuda:{args.local_rank}")
-        else:
-            device = torch.device("cpu")
+def main(args=None, provided_rank=None, provided_world_size=None):
+    """
+    Main training function, modified to work with simulation
     
+    Args:
+        args: Command line arguments (if None, will parse from command line)
+        provided_rank: Process rank (set by simulation)
+        provided_world_size: Total number of processes (set by simulation)
+    """
+    if args is None:
+        args = parse_args()
+    
+    if provided_rank is not None and provided_world_size is not None:
+        rank = provided_rank
+        world_size = provided_world_size
+        dist_initialized_externally = True
     else:
-        rank = 0
-        world_size = 1
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        dist_initialized_externally = False
+        
+        if args.local_rank != -1:
+            if args.backend == 'auto':
+                backend = 'nccl' if torch.cuda.is_available() else 'gloo'
+            else:
+                backend = args.backend
+
+            dist.init_process_group(backend=backend)
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+        else:
+            rank = 0
+            world_size = 1
 
     if rank == 0:
-        print(f"Using backend: {backend if args.local_rank != -1 else 'N/A'}")
-        print(f"Using device: {device}")
+        print(f"Using device: {torch.device('cuda' if torch.cuda.is_available() else 'cpu')}")
         print(f"World size: {world_size}")
 
     torch.manual_seed(args.seed)
+
+    if torch.cuda.is_available():
+        if args.local_rank != -1:
+            torch.cuda.set_device(args.local_rank)
+            device = torch.device(f"cuda:{args.local_rank}")
+        else:
+            device = torch.device("cuda:0")
+    else:
+        device = torch.device("cpu")
 
     train_dataset, test_dataset, classes = load_cifar10_data(
         batch_size=args.batch_size,
@@ -179,8 +199,8 @@ def main():
 
     model = SimpleCNN().to(device)
 
-    if args.local_rank != -1:
-        if backend == 'nccl':
+    if world_size > 1:
+        if torch.cuda.is_available():
             model = DDP(model, device_ids=[args.local_rank])
         else:
             model = DDP(model)
@@ -211,7 +231,7 @@ def main():
 
             if test_acc > best_acc and args.save_model:
                 best_acc = test_acc
-                torch.save(model.module.state_dict() if args.local_rank != -1 else model.state_dict(), "cifar10_cnn_best.pth")
+                torch.save(model.module.state_dict() if world_size > 1 else model.state_dict(), "cifar10_cnn_best.pth")
                 print(f"Saved model with accuracy: {best_acc:.2f}%")
 
         scheduler.step()
@@ -222,10 +242,10 @@ def main():
         print(f"Best test accuracy: {best_acc:.2f}%")
 
         if args.save_model:
-            torch.save(model.module.state_dict() if args.local_rank != -1 else model.state_dict(), "cifar10_cnn_final.pth")
+            torch.save(model.module.state_dict() if world_size > 1 else model.state_dict(), "cifar10_cnn_final.pth")
             print("Final model saved")
     
-    if args.local_rank != -1:
+    if args.local_rank != -1 and not dist_initialized_externally:
         dist.destroy_process_group()
 
 if __name__ == "__main__":
